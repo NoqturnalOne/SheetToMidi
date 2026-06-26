@@ -46,32 +46,22 @@ def pdf_to_images(pdf_path: Path, dpi: int = 300) -> list[Path]:
 def run_oemer(image_path: Path, out_dir: Path) -> Path:
     """Run oemer OMR on a single image; return path to produced MusicXML."""
     try:
-        from oemer.ete import inference
+        from argparse import Namespace
+        from oemer.ete import extract, clear_data
     except ImportError:
         sys.exit("oemer is not installed. Run: pip install oemer")
 
     log(f"Running OMR on {image_path.name} …")
-    # oemer writes output into out_dir/<stem>/
-    inference(
+    clear_data()
+    args = Namespace(
         img_path=str(image_path),
         output_path=str(out_dir),
-        use_tf=False,        # use ONNX runtime, not TensorFlow
-        save_imgs=False,
+        use_tf=False,
+        save_cache=False,
+        without_deskew=False,
     )
-
-    # oemer names the output <stem>.musicxml inside a subdirectory named after the stem
-    stem = image_path.stem
-    candidates = list(out_dir.rglob("*.musicxml")) + list(out_dir.rglob("*.xml"))
-    if not candidates:
-        sys.exit(
-            f"oemer did not produce a MusicXML file under {out_dir}. "
-            "Check that the image is a clear scan of printed sheet music."
-        )
-    # Prefer a file whose name matches the input stem
-    for c in candidates:
-        if c.stem == stem:
-            return c
-    return candidates[0]
+    out_path = extract(args)
+    return Path(out_path)
 
 
 def merge_musicxml(xml_paths: list[Path], merged_path: Path) -> Path:
