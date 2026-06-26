@@ -22,19 +22,24 @@ sys.path.insert(0, str(Path(__file__).parent))
 def run_conversion(input_path, output_path, dpi, keep_xml, log_fn, done_fn):
     """Runs the conversion pipeline in a background thread."""
     import io
-    import contextlib
+    import time
 
-    # Redirect sheet_to_midi's print output to the GUI log
-    class LogWriter(io.TextIOBase):
-        def write(self, s):
-            if s.strip():
-                log_fn(s.rstrip())
-            return len(s)
+    # Heartbeat: logs "still running" every 30 s while the worker is active
+    _alive = threading.Event()
+    _alive.set()
 
-    writer = LogWriter()
+    def _heartbeat():
+        elapsed = 0
+        while _alive.is_set():
+            time.sleep(30)
+            if _alive.is_set():
+                elapsed += 30
+                log_fn(f"[heartbeat] Still running … ({elapsed}s elapsed)")
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
+
     try:
         import sheet_to_midi as s2m
-        # Monkey-patch log() to route through GUI
         original_log = s2m.log
         s2m.log = lambda msg: log_fn(f"[sheet_to_midi] {msg}")
         try:
@@ -53,6 +58,8 @@ def run_conversion(input_path, output_path, dpi, keep_xml, log_fn, done_fn):
     except Exception as e:
         log_fn(f"[error] {type(e).__name__}: {e}")
         done_fn(success=False)
+    finally:
+        _alive.clear()
 
 
 # ---------------------------------------------------------------------------
