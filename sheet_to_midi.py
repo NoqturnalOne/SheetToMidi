@@ -6,6 +6,7 @@ Usage:
     python sheet_to_midi.py <input> [output.mid] [options]
 
 Supports: PNG, JPG, BMP, TIFF, PDF
+OMR engine: Audiveris 5.10.2
 """
 
 import argparse
@@ -43,25 +44,53 @@ def pdf_to_images(pdf_path: Path, dpi: int = 300) -> list[Path]:
     return paths
 
 
-def run_oemer(image_path: Path, out_dir: Path) -> Path:
-    """Run oemer OMR on a single image; return path to produced MusicXML."""
-    try:
-        from argparse import Namespace
-        from oemer.ete import extract, clear_data
-    except ImportError:
-        sys.exit("oemer is not installed. Run: pip install oemer")
+AUDIVERIS_EXE = Path(r"C:\Program Files\Audiveris\Audiveris.exe")
+
+
+def run_audiveris(image_path: Path, out_dir: Path) -> Path:
+    """Run Audiveris OMR on a single image; return path to produced MXL file."""
+    import subprocess
+    import zipfile
+
+    if not AUDIVERIS_EXE.exists():
+        sys.exit(
+            f"Audiveris not found at {AUDIVERIS_EXE}. "
+            "Download from https://github.com/Audiveris/audiveris/releases"
+        )
 
     log(f"Running OMR on {image_path.name} …")
-    clear_data()
-    args = Namespace(
-        img_path=str(image_path),
-        output_path=str(out_dir),
-        use_tf=False,
-        save_cache=False,
-        without_deskew=False,
-    )
-    out_path = extract(args)
-    return Path(out_path)
+    cmd = [
+        str(AUDIVERIS_EXE),
+        "-batch",
+        "-export",
+        "-output", str(out_dir),
+        "--", str(image_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.stdout.strip():
+        for line in result.stdout.strip().splitlines():
+            log(f"  {line}")
+    if result.returncode != 0:
+        sys.exit(f"Audiveris failed (exit {result.returncode}):\n{result.stderr}")
+
+    # Audiveris outputs a .mxl (zipped MusicXML) — extract it
+    mxl_files = list(out_dir.rglob("*.mxl"))
+    if not mxl_files:
+        sys.exit(
+            "Audiveris did not produce an MXL file. "
+            "Check that the image is a clear scan of printed sheet music."
+        )
+    mxl_path = mxl_files[0]
+    xml_path = mxl_path.with_suffix(".musicxml")
+    with zipfile.ZipFile(mxl_path, "r") as z:
+        # The MusicXML file inside the zip is typically named container.xml or the score xml
+        xml_entries = [n for n in z.namelist() if n.endswith(".xml") and not n.startswith("META")]
+        if not xml_entries:
+            sys.exit("Could not find MusicXML inside the Audiveris MXL archive.")
+        with z.open(xml_entries[0]) as src, open(xml_path, "wb") as dst:
+            dst.write(src.read())
+
+    return xml_path
 
 
 def merge_musicxml(xml_paths: list[Path], merged_path: Path) -> Path:
@@ -131,7 +160,7 @@ def process(input_path: Path, output_path: Path, dpi: int, keep_xml: bool) -> No
 
         xml_paths: list[Path] = []
         for img in image_paths:
-            xml_paths.append(run_oemer(img, omr_out))
+            xml_paths.append(run_audiveris(img, omr_out))
 
         # --- Step 3: merge if multi-page ---
         if len(xml_paths) > 1:
