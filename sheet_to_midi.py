@@ -66,6 +66,7 @@ def run_oemer(image_path: Path, out_dir: Path) -> Path:
 
 def merge_musicxml(xml_paths: list[Path], merged_path: Path) -> Path:
     """Concatenate multiple MusicXML scores into one using music21 parts."""
+    import copy
     import music21 as m21
 
     if len(xml_paths) == 1:
@@ -75,13 +76,12 @@ def merge_musicxml(xml_paths: list[Path], merged_path: Path) -> Path:
     base = m21.converter.parse(str(xml_paths[0]))
     for xp in xml_paths[1:]:
         extra = m21.converter.parse(str(xp))
-        # Append measures from each part
         for i, part in enumerate(extra.parts):
             if i < len(base.parts):
                 for measure in part.getElementsByClass(m21.stream.Measure):
-                    base.parts[i].append(measure)
+                    base.parts[i].append(copy.deepcopy(measure))
             else:
-                base.append(part)
+                base.append(copy.deepcopy(part))
 
     base.write("musicxml", fp=str(merged_path))
     return merged_path
